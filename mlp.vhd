@@ -20,16 +20,16 @@ end mlp;
 architecture default of mlp is
   constant HIDDEN : integer := NUM_HIDDEN_WIDTH**2;
   constant IN_COUNT : integer := COUNT_WIDTH**2;
-  constant zero : std_logic_vector(IN_COUNT-1 downto 0) := (others => '0');
+  constant zero : unsigned(IN_COUNT-1 downto 0) := (others => '0');
   subtype half is std_logic_vector(15 downto 0);
   type W1t is array(IN_COUNT-1 downto 0, HIDDEN-1 downto 0) of half;
   type W2t is array(HIDDEN-1 downto 0) of half;
 
   -- parameters
-  signal W1 : W1t;
-  signal B1 : W2t;
-  signal W2 : W2t;
-  signal B2 : half;
+  signal W1 : W1t := (others => (others => (others => '0')));
+  signal B1 : W2t := (others => (others => '0'));
+  signal W2 : W2t := (others => (others => '0'));
+  signal B2 : half := (others => '0');
 
   signal float_in: half;
   signal float_out :half;
@@ -63,7 +63,24 @@ architecture default of mlp is
     l2_state : unsigned(NUM_HIDDEN_WIDTH downto 0);
   end record;
 
-  signal state : statet;
+  signal state : statet := (
+    data_counter => (others => '0'),
+    data_number => (others => '0'),
+    finish => '0',
+    float => (others => '0'),
+    float_valid => '0',
+    float_last => '0',
+    l1_multiplication => (others => (others => (others => '0'))),
+    l1_multiplication_valid => '0',
+    l1_multiplication_last => '0',
+    l1_accumulation => (others => (others => (others => '0'))),
+    l1_accumulation_valid => '0',
+    l1_activation => (others => (others => '0')),
+    l1_activation_valid => '0',
+    l2_multiplication => (others => (others => '0')),
+    l2_accumulation => (others => (others => '0')),
+    l2_state => (others => '0')
+  );
 
   component conv_half
     generic (
@@ -143,11 +160,11 @@ begin
     do => l2_accumulation_in(j+HIDDEN/2));
   end generate;
 
-  second_accumulation_j : for j in 1 to NUM_HIDDEN_WIDTH-1 generate
-    second_accumulation_k : for k in 0 to 2**j generate
+  second_accumulation_j : for j in NUM_HIDDEN_WIDTH-3 downto 1 generate
+    second_accumulation_k : for k in 0 to 0 generate
       add3 : add port map (
-      da => state.l2_accumulation(2*k+2**j),
-      db => state.l2_accumulation(2*k+1+2**j),
+      da => state.l2_accumulation((2*k)+(2**j)),
+      db => state.l2_accumulation((2*k+1)+(2**j)),
       do => l2_accumulation_in(k+2**(j-1)));
     end generate;
   end generate;
@@ -163,7 +180,7 @@ begin
   begin
 
     if data_in_valid = '1' then
-      if data_number = zero then
+      if unsigned(data_number) = zero then
         vstate.data_counter := state.data_counter+1;
         if state.data_counter = state.data_number then
           vstate.finish := '1';
@@ -185,7 +202,7 @@ begin
       end if;
     end if;
 
-    if state.data_counter = IN_COUNT-1 then
+    if state.data_counter = to_unsigned(IN_COUNT-1, COUNT_WIDTH) then
       vstate.float_last := '1';
       vstate.data_counter := (others => '0');
     else
