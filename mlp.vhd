@@ -5,22 +5,21 @@ use IEEE.numeric_std.all;
 entity mlp is
   generic (
     DATA_WIDTH : integer := 14;
-    COUNT_WIDTH : integer := 8;
-    NUM_HIDDEN_WIDTH : integer := 8);
+    DIM_DATA_WIDTH : integer := 8;
+    DIM_HIDDEN_WIDTH : integer := 8);
 
   port (
     clk : in std_logic;
     data_in : in std_logic_vector(DATA_WIDTH-1 downto 0);
     data_in_valid : in std_logic;
-    data_number : in std_logic_vector(COUNT_WIDTH-1 downto 0);
+    first : in std_logic;
     data_out : out std_logic_vector(15 downto 0);
     data_out_valid : out std_logic);
 end mlp;
 
 architecture default of mlp is
-  constant HIDDEN : integer := NUM_HIDDEN_WIDTH**2;
-  constant IN_COUNT : integer := COUNT_WIDTH**2;
-  constant zero : unsigned(IN_COUNT-1 downto 0) := (others => '0');
+  constant HIDDEN : integer := DIM_HIDDEN_WIDTH**2;
+  constant IN_COUNT : integer := DIM_DATA_WIDTH**2;
   subtype half is std_logic_vector(15 downto 0);
   type W1t is array(IN_COUNT-1 downto 0, HIDDEN-1 downto 0) of half;
   type W2t is array(HIDDEN-1 downto 0) of half;
@@ -31,22 +30,16 @@ architecture default of mlp is
   signal W2 : W2t := (others => (others => '0'));
   signal B2 : half := (others => '0');
 
-  signal float_in: half;
-  signal float_out :half;
+  signal conv0_out : half;
   signal l1_multiplication_in : W1t;
-  signal l1_multiplication_out : W1t;
   signal l1_accumulation_in : W1t;
-  signal l1_accumulation_out : W1t;
   signal l1_activation_in : W2t;
-  signal l1_activation_out : W2t;
   signal l2_multiplication_in : W2t;
-  signal l2_multiplication_out : W2t;
   signal l2_accumulation_in : W2t;
-  signal l2_accumulation_out : W2t;
 
   type statet is record
-    data_counter : unsigned(COUNT_WIDTH+1 downto 0);
-    data_number : unsigned(COUNT_WIDTH-1 downto 0);
+    data_counter : unsigned(DIM_DATA_WIDTH+1 downto 0);
+    data_number : unsigned(DIM_DATA_WIDTH-1 downto 0);
     finish : std_logic;
     float : half;
     float_valid : std_logic;
@@ -60,7 +53,7 @@ architecture default of mlp is
     l1_activation_valid : std_logic;
     l2_multiplication : W2t;
     l2_accumulation : W2t;
-    l2_state : unsigned(NUM_HIDDEN_WIDTH downto 0);
+    l2_state : unsigned(DIM_HIDDEN_WIDTH downto 0);
   end record;
 
   signal state : statet := (
@@ -113,7 +106,7 @@ begin
 
   conv0 : conv_half port map (
   di => data_in,
-  do => float_in);
+  do => conv0_out);
   
   first_multiplication_i : for i in 0 to IN_COUNT-1 generate
     first_multiplication_j : for j in 0 to HIDDEN-1 generate
@@ -160,7 +153,7 @@ begin
     do => l2_accumulation_in(j+HIDDEN/2));
   end generate;
 
-  second_accumulation_j : for j in NUM_HIDDEN_WIDTH-3 downto 1 generate
+  second_accumulation_j : for j in DIM_HIDDEN_WIDTH-3 downto 1 generate
     second_accumulation_k : for k in 0 to 0 generate
       add3 : add port map (
       da => state.l2_accumulation((2*k)+(2**j)),
@@ -180,37 +173,21 @@ begin
   begin
 
     if data_in_valid = '1' then
-      if unsigned(data_number) = zero then
-        vstate.data_counter := state.data_counter+1;
-        if state.data_counter = state.data_number then
-          vstate.finish := '1';
-        end if;
-      else
+      if first = '1' then
         vstate.data_counter := (others => '0');
-        vstate.data_number := unsigned(data_number);
-      end if;
-
-      vstate.float_valid := data_in_valid;
-      if data_in_valid = '1' then
-        vstate.float := float_in;
       else
-        vstate.float := (others => '0');
-      end if;
-    else
-      if state.finish = '1' then
         vstate.data_counter := state.data_counter+1;
       end if;
+
+      vstate.float := conv0_out;
     end if;
 
-    if state.data_counter = to_unsigned(IN_COUNT-1, COUNT_WIDTH) then
-      vstate.float_last := '1';
-      vstate.data_counter := (others => '0');
-    else
-      vstate.float_last := '0';
-    end if;
+    vstate.float_valid := data_in_valid;
 
     vstate.l1_multiplication_valid := state.float_valid;
-    vstate.l1_multiplication_last := state.float_last;
+    if state.data_counter = to_unsigned(DIM_DATA-1, DIM_DATA_WIDTH) then
+      vstate.l1_multiplication_last := '1';
+    end if;
     vstate.l1_multiplication := l1_multiplication_in;
 
     if state.l1_multiplication_valid = '1' then
@@ -222,11 +199,11 @@ begin
     vstate.l1_activation_valid := state.l1_accumulation_valid;
 
     vstate.l2_state(0) := state.l1_accumulation_valid;
-    for i in 1 to NUM_HIDDEN_WIDTH loop
+    for i in 1 to DIM_HIDDEN_WIDTH loop
       vstate.l2_state(i) := state.l2_state(i-1);
     end loop;
 
-    vout_valid := state.l2_state(NUM_HIDDEN_WIDTH);
+    vout_valid := state.l2_state(DIM_HIDDEN_WIDTH);
 
     if rising_edge(clk) then
       state <= vstate;

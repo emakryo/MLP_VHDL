@@ -10,11 +10,12 @@ entity mul is
 end mul;
 
 architecture default of mul is
-  signal a,b,c : signed(15 downto 0);
+  signal a,b : unsigned(15 downto 0);
+  signal c : unsigned(31 downto 0);
 begin
-  a <= signed(da);
-  b <= signed(db);
-  c <= a+b;
-  do <= std_logic_vector(c);
+  a <= unsigned(da);
+  b <= unsigned(db);
+  c <= a*b;
+  do <= std_logic_vector(c(15 downto 0));
 end default;
 

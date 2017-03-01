@@ -10,10 +10,10 @@ entity add is
 end add;
 
 architecture default of add is
-  signal a,b,c : signed(15 downto 0);
+  signal a,b,c : unsigned(15 downto 0);
 begin
-  a <= signed(da);
-  b <= signed(db);
+  a <= unsigned(da);
+  b <= unsigned(db);
   c <= a+b;
   do <= std_logic_vector(c);
 end default;
