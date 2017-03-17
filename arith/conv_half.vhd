@@ -11,7 +11,7 @@ entity conv_half is
 end conv_half;
 
 architecture default of conv_half is
-  signal tmp : std_logic_vector(15 downto DATA_WIDTH);
+  signal tmp : std_logic_vector(15 downto DATA_WIDTH) := (others => '0');
 begin
   do <= tmp & di;
 end default;

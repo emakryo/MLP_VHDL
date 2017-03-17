@@ -8,9 +8,11 @@ entity l1 is
   port (
   clk : in std_logic;
   xi : in std_logic_vector(15 downto 0);
-  addr : in std_logic_vector(DIM_X_WIDTH-1 downto 0);
+  xi_valid : in std_logic;
+  first : in std_logic;
   last : in std_logic;
   wi : inout std_logic_vector(15 downto 0);
+  wi_addr : in std_logic_vector(DIM_X_WIDTH-1 downto 0);
   wi_en : in std_logic;
   wi_wr : in std_logic;
   b : inout std_logic_vector(15 downto 0);
@@ -55,12 +57,14 @@ architecture default of l1 is
 
   type state_type is record 
     x : float;
+    counter : unsigned(DIM_X_WIDTH-1 downto 0);
     z : float;
     z_valid : std_logic;
   end record;
 
   signal state : state_type := (
     x => (others => '0'),
+    counter => (others => '0'),
     z => (others => '0'),
     z_valid => '0');
 begin
@@ -82,15 +86,27 @@ begin
 
   z <= state.z;
   z_valid <= state.z_valid;
+  Wreg_out <= Wreg(to_integer(state.counter));
 
   process(clk)
     variable vstate : state_type;
     variable iaddr : integer;
   begin
     vstate := state;
-    iaddr := to_integer(unsigned(addr));
-    vstate.x := xi;
+    iaddr := to_integer(unsigned(wi_addr));
+    if xi_valid = '1' then
+      vstate.x := xi;
+      if first = '1' then
+        vstate.counter := (others => '0');
+      else
+        vstate.counter := vstate.counter+1;
+      end if;
+    else
+      vstate.x := (others => '0');
+    end if;
+
     vstate.z_valid := last;
+
     if iaddr = 0 then
       vstate.z := breg;
     else
@@ -98,7 +114,6 @@ begin
     end if;
 
     if rising_edge(clk) then
-      Wreg_out <= Wreg(iaddr);
       state <= vstate;
       if wi_en = '1' then
         if wi_wr = '1' then

@@ -10,147 +10,156 @@ entity mlp is
 
   port (
     clk : in std_logic;
-    data_in : in std_logic_vector(DATA_WIDTH-1 downto 0);
-    data_in_valid : in std_logic;
+    xi : in std_logic_vector(DATA_WIDTH-1 downto 0);
+    xi_valid : in std_logic;
     first : in std_logic;
-    data_out : out std_logic_vector(15 downto 0);
-    data_out_valid : out std_logic);
+    last : in std_logic;
+    w1 : inout std_logic_vector(15 downto 0);
+    w1_en : in std_logic;
+    w1_wr : in std_logic;
+    w1_addrx : in std_logic_vector(DIM_DATA_WIDTH-1 downto 0);
+    w1_addrz : in std_logic_vector(DIM_HIDDEN_WIDTH-1 downto 0);
+    b1 : inout std_logic_vector(15 downto 0);
+    b1_en : in std_logic;
+    b1_wr : in std_logic;
+    b1_addr : in std_logic_vector(DIM_HIDDEN_WIDTH-1 downto 0);
+    w2 : inout std_logic_vector(15 downto 0);
+    w2_en : in std_logic;
+    w2_wr : in std_logic;
+    w2_addr : in std_logic_vector(DIM_HIDDEN_WIDTH-1 downto 0);
+    b2 : inout std_logic_vector(15 downto 0);
+    b2_en : in std_logic;
+    b2_wr : in std_logic;
+    fx : out std_logic_vector(15 downto 0);
+    fx_valid : out std_logic);
 end mlp;
 
 architecture default of mlp is
   constant HIDDEN : integer := DIM_HIDDEN_WIDTH**2;
   constant IN_COUNT : integer := DIM_DATA_WIDTH**2;
-  subtype half is std_logic_vector(15 downto 0);
-  type W1t is array(IN_COUNT-1 downto 0, HIDDEN-1 downto 0) of half;
-  type W2t is array(HIDDEN-1 downto 0) of half;
+  subtype float is std_logic_vector(15 downto 0);
+  type hidden_array_t is array(HIDDEN-1 downto 0) of float;
 
-  -- parameters
-  signal W1 : W1t := (others => (others => (others => '0')));
-  signal B1 : W2t := (others => (others => '0'));
-  signal W2 : W2t := (others => (others => '0'));
-  signal B2 : half := (others => '0');
+  signal conv_half0_out : float;
+  signal z : hidden_array_t;
+  signal mul1_do : hidden_array_t;
+  signal l2_multiplication : hidden_array_t;
+  signal l2_accumulation : hidden_array_t;
+  signal output : float;
 
-  signal conv0_out : half;
-  signal l1_multiplication_in : W1t;
-  signal l1_accumulation_in : W1t;
-  signal l1_activation_in : W2t;
-  signal l2_multiplication_in : W2t;
-  signal l2_accumulation_in : W2t;
-
-  type statet is record
-    data_counter : unsigned(DIM_DATA_WIDTH+1 downto 0);
-    data_number : unsigned(DIM_DATA_WIDTH-1 downto 0);
-    finish : std_logic;
-    float : half;
-    float_valid : std_logic;
-    float_last : std_logic;
-    l1_multiplication : W1t;
-    l1_multiplication_valid : std_logic;
-    l1_multiplication_last : std_logic;
-    l1_accumulation : W1t;
-    l1_accumulation_valid : std_logic;
-    l1_activation : W2t;
-    l1_activation_valid : std_logic;
-    l2_multiplication : W2t;
-    l2_accumulation : W2t;
-    l2_state : unsigned(DIM_HIDDEN_WIDTH downto 0);
+  type state_type is record
+    w1_addr : std_logic_vector(DIM_DATA_WIDTH-1 downto 0);
+    w1_en : std_logic_vector(HIDDEN-1 downto 0);
+    w1_wr : std_logic;
+    b1_addr : std_logic_vector(DIM_DATA_WIDTH-1 downto 0);
+    b1_en : std_logic_vector(HIDDEN-1 downto 0);
+    b1_wr : std_logic;
+    w2 : hidden_array_t;
+    b2 : float;
+    last : std_logic_vector(DIM_HIDDEN_WIDTH downto 0);
+    l2_multiplication : hidden_array_t;
+    l2_accumulation : hidden_array_t;
   end record;
 
-  signal state : statet := (
-    data_counter => (others => '0'),
-    data_number => (others => '0'),
-    finish => '0',
-    float => (others => '0'),
-    float_valid => '0',
-    float_last => '0',
-    l1_multiplication => (others => (others => (others => '0'))),
-    l1_multiplication_valid => '0',
-    l1_multiplication_last => '0',
-    l1_accumulation => (others => (others => (others => '0'))),
-    l1_accumulation_valid => '0',
-    l1_activation => (others => (others => '0')),
-    l1_activation_valid => '0',
+  signal state : state_type := (
+    w1_addr => (others => '0'),
+    w1_en => (others => '0'),
+    w1_wr =>  '0',
+    b1_addr => (others => '0'),
+    b1_en => (others => '0'),
+    b1_wr => '0',
+    w2 => (others => (others => '0')),
+    b2 => (others => '0'),
+    last => (others => '0'),
     l2_multiplication => (others => (others => '0')),
-    l2_accumulation => (others => (others => '0')),
-    l2_state => (others => '0')
-  );
+    l2_accumulation => (others => (others => '0')));
+
+    type tristate_type is record
+      w1 : hidden_array_t;
+      b1 : hidden_array_t;
+    end record;
+
+    signal tristate : tristate_type := (
+      w1 => (others => (others => 'Z')),
+      b1 => (others => (others => 'Z')));
+
 
   component conv_half
-    generic (
-    DATA_WIDTH : integer := DATA_WIDTH);
     port (
     di : in std_logic_vector(DATA_WIDTH-1 downto 0);
-    do : out half);
+    do : out float);
   end component;
 
   component mul
     port (
-    da : in half;
-    db : in half;
-    do : out half);
+    da : in float;
+    db : in float;
+    do : out float);
   end component;
 
   component add
     port (
-    da : in half;
-    db : in half;
-    do : out half);
+    da : in float;
+    db : in float;
+    do : out float);
   end component;
 
-  component activate
+  component l1
+    generic (
+    DIM_X_WIDTH : integer := DIM_DATA_WIDTH);
     port (
-    da : in half;
-    do : out half);
+    clk : in std_logic;
+    xi : in std_logic_vector(15 downto 0);
+    xi_valid : in std_logic;
+    first : in std_logic;
+    last : in std_logic;
+    wi : inout std_logic_vector(15 downto 0);
+    wi_addr : in std_logic_vector(DIM_X_WIDTH-1 downto 0);
+    wi_en : in std_logic;
+    wi_wr : in std_logic;
+    b : inout std_logic_vector(15 downto 0);
+    b_en : in std_logic;
+    b_wr : in std_logic;
+    z : out std_logic_vector(15 downto 0);
+    z_valid : out std_logic);
   end component;
+    
 begin
 
-  conv0 : conv_half port map (
-  di => data_in,
-  do => conv0_out);
-  
-  first_multiplication_i : for i in 0 to IN_COUNT-1 generate
-    first_multiplication_j : for j in 0 to HIDDEN-1 generate
-      mul0 : mul port map (
-      da => state.float,
-      db => W1(i, j),
-      do => l1_multiplication_in(i, j));
-    end generate;
-  end generate;
+  conv_half0 : conv_half port map (
+    di => xi,
+    do => conv_half0_out);
 
-  first_accumulation_0 : for j in 0 to HIDDEN-1 generate
-    add0 : add port map (
-    da => state.l1_multiplication(0, j),
-    db => B1(j),
-    do => l1_accumulation_in(0, j));
-  end generate;
-
-  first_accumulation_i : for i in 1 to IN_COUNT-1 generate
-    first_accumulation_j : for j in 0 to HIDDEN-1 generate
-      add1 : add port map (
-      da => state.l1_multiplication(i, j),
-      db => state.l1_accumulation(i-1, j),
-      do => l1_accumulation_in(i, j));
-    end generate;
-  end generate;
-
-  activation : for j in 0 to HIDDEN-1 generate
-    act0 : activate port map (
-    da => state.l1_accumulation(IN_COUNT-1, j),
-    do => l1_activation_in(j));
+  first_layers : for i in 0 to HIDDEN-1 generate
+    l1_0 : l1 port map (
+    clk => clk,
+    xi => conv_half0_out,
+    xi_valid => xi_valid,
+    first => first,
+    last => last,
+    wi_addr => w1_addrx,
+    wi => tristate.w1(i),
+    wi_en => state.w1_en(i),
+    wi_wr => state.w1_wr,
+    b => tristate.b1(i),
+    b_en => state.b1_en(i),
+    b_wr => state.b1_wr,
+    z => z(i),
+    z_valid => open);
   end generate;
 
   second_multiplication : for j in 0 to HIDDEN-1 generate
     mul1 : mul port map (
-    da => state.l1_activation(j),
-    db => W2(j),
-    do => l2_multiplication_in(j));
+    da => z(j),
+    db => state.w2(j),
+    do => l2_multiplication(j));
   end generate;
 
   second_accumulation_0 : for j in 0 to HIDDEN/2-1 generate
     add2 : add port map (
     da => state.l2_multiplication(2*j),
     db => state.l2_multiplication(2*j+1),
-    do => l2_accumulation_in(j+HIDDEN/2));
+    do => l2_accumulation(j+HIDDEN/2));
   end generate;
 
   second_accumulation_j : for j in DIM_HIDDEN_WIDTH-3 downto 1 generate
@@ -158,56 +167,78 @@ begin
       add3 : add port map (
       da => state.l2_accumulation((2*k)+(2**j)),
       db => state.l2_accumulation((2*k+1)+(2**j)),
-      do => l2_accumulation_in(k+2**(j-1)));
+      do => l2_accumulation(k+2**(j-1)));
     end generate;
   end generate;
 
   add4 : add port map (
   da => state.l2_accumulation(1),
-  db => B2,
-  do => data_out);
+  db => state.b2,
+  do => output);
 
   process(clk)
-    variable vstate : statet := state;
-    variable vout_valid : std_logic;
+    variable vstate : state_type;
+    variable vtristate : tristate_type;
   begin
+    vstate := state;
+    vtristate.w1 := (others => (others => 'Z'));
+    vtristate.b1 := (others => (others => 'Z'));
 
-    if data_in_valid = '1' then
-      if first = '1' then
-        vstate.data_counter := (others => '0');
-      else
-        vstate.data_counter := state.data_counter+1;
+    vstate.l2_multiplication := l2_multiplication;
+    vstate.l2_accumulation := l2_accumulation;
+    vstate.last := state.last(DIM_HIDDEN_WIDTH-1 downto 0) & last;
+
+    vstate.w1_en := (others => '0');
+    vstate.w1_en(to_integer(unsigned(w1_addrz))) := '1';
+    vstate.w1_wr := w1_wr;
+    vstate.b1_en := (others => '0');
+    vstate.b1_en(to_integer(unsigned(b1_addr))) := '1';
+    vstate.b1_wr := b1_wr;
+
+    if w1_en = '1' and w1_wr = '1' then
+      vtristate.w1(to_integer(unsigned(w1_addrz))) := w1;
+    end if;
+
+    for i in 0 to HIDDEN-1 loop
+      if state.w1_en(i) = '1' and state.w1_wr = '0' then
+        w1 <= tristate.w1(i);
       end if;
-
-      vstate.float := conv0_out;
-    end if;
-
-    vstate.float_valid := data_in_valid;
-
-    vstate.l1_multiplication_valid := state.float_valid;
-    if state.data_counter = to_unsigned(DIM_DATA-1, DIM_DATA_WIDTH) then
-      vstate.l1_multiplication_last := '1';
-    end if;
-    vstate.l1_multiplication := l1_multiplication_in;
-
-    if state.l1_multiplication_valid = '1' then
-      vstate.l1_accumulation := l1_accumulation_in;
-      vstate.l1_accumulation_valid := state.l1_multiplication_last;
-    end if;
-
-    vstate.l1_activation := l1_activation_in;
-    vstate.l1_activation_valid := state.l1_accumulation_valid;
-
-    vstate.l2_state(0) := state.l1_accumulation_valid;
-    for i in 1 to DIM_HIDDEN_WIDTH loop
-      vstate.l2_state(i) := state.l2_state(i-1);
     end loop;
 
-    vout_valid := state.l2_state(DIM_HIDDEN_WIDTH);
+    if b1_en = '1' and b1_wr = '1' then
+      vtristate.b1(to_integer(unsigned(b1_addr))) := b1;
+    end if;
+
+    for i in 0 to HIDDEN-1 loop
+      if state.b1_en(i) = '1' and state.b1_wr = '0' then
+        b1 <= tristate.b1(i);
+      end if;
+    end loop;
+
+    if w2_en = '1' then
+      if w2_wr = '1' then
+        vstate.w2(to_integer(unsigned(w2_addr))) := w2;
+        w2 <= (others => 'Z');
+      else
+        w2 <= state.w2(to_integer(unsigned(w2_addr)));
+      end if;
+    else
+      w2 <= (others => 'Z');
+    end if;
+
+    if b2_en = '1' then
+      if b2_wr = '1' then
+        vstate.b2 := b2;
+        b2 <= (others => 'Z');
+      else
+        b2 <= state.b2;
+      end if;
+    else
+      b2 <= (others => 'Z');
+    end if;
 
     if rising_edge(clk) then
       state <= vstate;
-      data_out_valid <= vout_valid;
     end if;
   end process;
 
